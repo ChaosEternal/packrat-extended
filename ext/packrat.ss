@@ -1,6 +1,6 @@
 ;; From chicken scheme's egg http://wiki.call-cc.org/eggref/4/packrat
 ;; From https://github.com/ktakashi/json-tools
-#!r6rs
+;;#!chezscheme
 (library (ext packrat)
     (export parse-result?
 	    parse-result-successful?
@@ -258,10 +258,12 @@
 (define (packrat-check-base-pred pred? k)
   (lambda (results)
     (let ((base (parse-results-base results)))
-      (if (and base (pred?  (car base))) 
+      (if (and base (pred? (car base))) 
 	  ((k (and base (cdr base))) (parse-results-next results))
 	  (make-expected-result (parse-results-position results)
-				(car base))))))
+				(if (not base)
+				    "end-of-file"
+				    (car base)))))))
 
 (define (packrat-check parser k)
   (lambda (results)
