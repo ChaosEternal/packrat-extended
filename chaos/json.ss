@@ -1,9 +1,10 @@
 ;; from chicken's egg wiki.call-cc.org/eggref/4/json
 ;; From https://github.com/ktakashi/json-tools
-#!chezscheme
 (library (chaos json)
   (export json-write
-	  json-read)
+	  json-read
+	  make-json-null
+	  json-null?)
   (import (rnrs)
 	  (rnrs r5rs)
 	  (ext packrat)
@@ -45,6 +46,8 @@
   (define (hashtable->vector ht)
     (let-values (((keys values) (hashtable-entries ht)))
       (vector-map cons keys values)))
+
+  (define-record-type json-null)
 
   (define json-write
     (let ()
@@ -88,7 +91,7 @@
 	 ((or (string? x)
 	      (number? x)) (write x p))
 	 ((boolean? x) (display (if x "true" "false") p))
-	 ((eq? x (void)) (display "null" p))
+	 ((json-null? x) (display "null" p))
 	 (else (error 'json-write "Invalid JSON object in json-write" x))))
 
       (lambda (x . maybe-port)
@@ -106,7 +109,8 @@
 		  (if (eof-object? x)
 		      (begin
 			(set! ateof #t)
-			(values pos #f))
+			(values pos (cons #\x04 #\x04))
+			)
 		      (let ((old-pos pos))
 			(set! pos (update-parse-position pos x))
 			(values old-pos (cons x x)))))))))
@@ -119,7 +123,8 @@
 			     ((n <- jnumber) n)
 			     ((white (token "true")) #t)
 			     ((white (token "false")) #f)
-			     ((white (token "null")) (void)))
+			     ((white (token "null")) (make-json-null))
+			     ((white '#\x04) (eof-object)))
 			(white-space ((a <- (? char-whitespace?) white-space) 'whitespace)
 				     ((b <- comment) 'whitespace)
 				     )
