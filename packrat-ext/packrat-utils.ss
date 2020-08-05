@@ -32,7 +32,7 @@
 	  jstring-body
 	  token
 	  )
-  (import (ext packrat)
+  (import (packrat-ext packrat)
 	  (rnrs))
 
   (define (true . dummy)
