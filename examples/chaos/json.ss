@@ -7,8 +7,8 @@
 	  json-null?)
   (import (rnrs)
 	  (rnrs r5rs)
-	  (ext packrat)
-	  (ext packrat-utils))
+	  (packrat-ext packrat)
+	  (packrat-ext packrat-utils))
 
   (define (void) 'null)
 

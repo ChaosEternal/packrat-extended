@@ -1,7 +1,7 @@
 ;; From chicken scheme's egg http://wiki.call-cc.org/eggref/4/packrat
 ;; From https://github.com/ktakashi/json-tools
 ;;#!chezscheme
-(library (ext packrat)
+(library (packrat-ext packrat)
     (export parse-result?
 	    parse-result-successful?
 	    parse-result-semantic-value

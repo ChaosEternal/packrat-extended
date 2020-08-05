@@ -22,7 +22,7 @@
 ;; CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 ;; SOFTWARE.
 
-(library (ext packrat-utils)
+(library (packrat-ext packrat-utils)
   (export true
 	  inverse
 	  test-all
