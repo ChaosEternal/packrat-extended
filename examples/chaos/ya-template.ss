@@ -27,8 +27,7 @@
 	  tpl-pass-1
 	  apply-parsed-template
 	  apply-template)
-  (import (rnrs)
-	  (rnrs r5rs)
+  (import (rnrs r5rs)
 	  (rnrs bytevectors)
 	  (packrat-ext packrat)
 	  (packrat-ext packrat-utils)
