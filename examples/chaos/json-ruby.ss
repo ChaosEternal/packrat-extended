@@ -1,5 +1,4 @@
 ;; from chicken's egg wiki.call-cc.org/eggref/4/json
-#!chezscheme
 (library (chaos json-ruby)
   (export packrat-reader
 	  json-ruby-parser)
