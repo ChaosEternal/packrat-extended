@@ -1,3 +1,5 @@
+#!/usr/bin/env guile
+!#
 ;; Packrat Parser Library Extended
 ;;
 ;; Copyright (c) 2020 Google LLC.
