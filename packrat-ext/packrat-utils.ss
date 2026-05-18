@@ -75,9 +75,6 @@
     (lambda (y)
       (char-ci=? x y)))
 
-  (define (char-valid-json-escape? c)
-    (memv c '(#\" #\\ #\/ #\b #\f #\n #\r #\t #\u)))
-
   (define jstring-body
     (packrat-parser any
 		    (any ((c <- jstring-char s <- any) (cons c s))
