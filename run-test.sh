@@ -24,3 +24,4 @@
 # SOFTWARE.
 
 guile -L . -L examples -L tests -x .ss tests/template.scm tests/test2.tpl
+scheme --libdirs .:examples:tests --program tests/json-test.ss
