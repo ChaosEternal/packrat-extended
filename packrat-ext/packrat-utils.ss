@@ -29,6 +29,7 @@
 	  test-any
 	  char-newline?
 	  char-valid-hex?
+	  char-nonzero-digit?
 	  jstring-body
 	  token
 	  )
@@ -52,6 +53,9 @@
 
   (define (char-newline? x)
     (memv x '(#\newline #\return)))
+
+  (define (char-nonzero-digit? x)
+    (and (char>=? x #\1) (char<=? x #\9)))
   
   (define char-valid-hex?
     (test-any
@@ -71,19 +75,25 @@
     (lambda (y)
       (char-ci=? x y)))
 
+  (define (char-valid-json-escape? c)
+    (memv c '(#\" #\\ #\/ #\b #\f #\n #\r #\t #\u)))
+
   (define jstring-body
     (packrat-parser any
 		    (any ((c <- jstring-char s <- any) (cons c s))
-			 ((c <- jstring-char) (cons c '())))
+			 ((c <- jstring-char) (cons c '()))
+			 (() '()))
 		    (jstring-char (((! '#\\) (! '#\") c <- (? true)) c)
+				  (('#\\ '#\") #\")
+				  (('#\\ '#\\) #\\)
+				  (('#\\ '#\/) #\/)
 				  (('#\\ '#\n) #\newline)
 				  (('#\\ '#\b) #\backspace)
 				  (('#\\ '#\f) #\page)
 				  (('#\\ '#\r) #\return)
 				  (('#\\ '#\t) #\tab)
 				  (('#\\ '#\u a <- (? char-valid-hex?) b <- (? char-valid-hex?) c <- (? char-valid-hex?) d <- (? char-valid-hex?) )
-				   (integer->char (string->number (list->string (list a b c d)) 16)))
-				  (('#\\ (! '#\u) c <- (? true)) c))))
+				   (integer->char (string->number (list->string (list a b c d)) 16))))))
   (define (token str . comp?)
     (let ((cmp? (if (null? comp?)
 		    char=?

@@ -85,8 +85,6 @@
 
 (section "Basic strings")
 (assert-equal "simple string" (json-parse "\"hello\"") "hello")
-;; Note: empty string "" is not supported by the current jstring-body grammar
-;; (it requires at least one character)
 (assert-equal "string with spaces" (json-parse "\"hello world\"") "hello world")
 
 (section "String escape sequences")
@@ -208,7 +206,52 @@
 (assert-true "trailing comma in object" (json-parse-fails? "{\"a\": 1,}"))
 (assert-true "bare word" (json-parse-fails? "undefined"))
 
-;; ---- 12. Edge cases ----
+;; ---- 12. Empty string support ----
+
+(section "Empty string support")
+(assert-equal "empty string" (json-parse "\"\"") "")
+(assert-equal "empty string in array" (json-parse "[\"\" , 1]") '("" 1))
+(assert-equal "empty string in object" (cdr (vector-ref (json-parse "{\"a\": \"\"}") 0)) "")
+(assert-equal "empty string key" (car (vector-ref (json-parse "{\"\": 1}") 0)) "")
+(assert-equal "roundtrip empty string" (json-roundtrip "\"\"") "\"\"")
+
+;; ---- 13. Signed exponents ----
+
+(section "Signed exponents")
+(assert-equal "1e+2" (json-parse "1e+2") 100.0)
+(assert-equal "1E+2" (json-parse "1E+2") 100.0)
+(assert-equal "1e-2" (json-parse "1e-2") 0.01)
+(assert-equal "1E-2" (json-parse "1E-2") 0.01)
+(assert-equal "25e+1" (json-parse "25e+1") 250.0)
+(assert-equal "3.14e+0" (json-parse "3.14e+0") 3.14)
+;; Use < comparison for float precision: 3.14e-1 may have rounding artifacts
+(assert-true "3.14e-1" (< (abs (- (json-parse "3.14e-1") 0.314)) 1e-15))
+(assert-equal "-1e+2" (json-parse "-1e+2") -100.0)
+(assert-equal "-1e-2" (json-parse "-1e-2") -0.01)
+
+;; ---- 14. Leading zeros rejection ----
+
+(section "Leading zeros rejection")
+(assert-equal "single zero" (json-parse "0") 0)
+(assert-equal "zero point five" (json-parse "0.5") 0.5)
+(assert-true "leading zero 01 rejected" (json-parse-fails? "01"))
+(assert-true "leading zero 0123 rejected" (json-parse-fails? "0123"))
+(assert-true "leading zero 007 rejected" (json-parse-fails? "007"))
+(assert-true "leading zero 00 rejected" (json-parse-fails? "00"))
+
+;; ---- 15. Invalid escape sequence rejection ----
+
+(section "Invalid escape sequence rejection")
+(assert-true "invalid escape \\a rejected" (json-parse-fails? "\"\\a\""))
+(assert-true "invalid escape \\x rejected" (json-parse-fails? "\"\\x\""))
+(assert-true "invalid escape \\1 rejected" (json-parse-fails? "\"\\1\""))
+(assert-true "invalid escape \\v rejected" (json-parse-fails? "\"\\v\""))
+;; Valid escapes still work
+(assert-equal "valid escape \\\"" (json-parse "\"a\\\"b\"") "a\"b")
+(assert-equal "valid escape \\\\" (json-parse "\"a\\\\b\"") "a\\b")
+(assert-equal "valid escape \\/" (json-parse "\"a\\/b\"") "a/b")
+
+;; ---- 16. Edge cases ----
 
 (section "Edge cases")
 ;; Deeply nested
