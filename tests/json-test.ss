@@ -42,6 +42,11 @@
       (json-write parsed port)
       (extract))))
 
+(define (json-parse-fails? str)
+  (guard (exn [#t #t])
+    (json-parse str)
+    #f))
+
 (define (section title)
   (newline)
   (display "=== ")
@@ -175,7 +180,32 @@
 (assert-equal "write empty object" (json-roundtrip "{}") "{}")
 (assert-equal "write object" (json-roundtrip "{\"a\": 1}") "{\"a\": 1}")
 
-;; ---- 9. Edge cases ----
+;; ---- 9. Negative numbers (known limitation) ----
+;; Note: the jnumber grammar does not handle a leading minus sign,
+;; so negative numbers are not supported by the parser.
+
+(section "Negative numbers (known limitation)")
+(assert-true "negative integer fails" (json-parse-fails? "-1"))
+(assert-true "negative float fails" (json-parse-fails? "-3.14"))
+
+;; ---- 10. Float round-trip ----
+
+(section "Float round-trip")
+(assert-equal "roundtrip float 3.14" (json-roundtrip "3.14") "3.14")
+(assert-equal "roundtrip float 0.5" (json-roundtrip "0.5") "0.5")
+(assert-equal "roundtrip float 1.0" (json-roundtrip "1.") "1.0")
+
+;; ---- 11. Malformed input ----
+
+(section "Malformed input")
+(assert-true "unclosed string" (json-parse-fails? "\"hello"))
+(assert-true "unclosed array" (json-parse-fails? "[1, 2"))
+(assert-true "unclosed object" (json-parse-fails? "{\"a\": 1"))
+(assert-true "trailing comma in array" (json-parse-fails? "[1, 2,]"))
+(assert-true "trailing comma in object" (json-parse-fails? "{\"a\": 1,}"))
+(assert-true "bare word" (json-parse-fails? "undefined"))
+
+;; ---- 12. Edge cases ----
 
 (section "Edge cases")
 ;; Deeply nested
