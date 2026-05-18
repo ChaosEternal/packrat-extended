@@ -151,6 +151,10 @@
 						((entry <- any) (list entry)))
 			(jstring ((white '#\" body <- jstring-body '#\") (list->string body)))
 			(jnumber
+			 ((white '#\- body <- jfixpoint (/ ('#\E) ('#\e)) e <- jinteger) (- (* (expt 10 (car e)) 1.0 body)))
+			 ((white '#\- body <- jinteger (/ ('#\E) ('#\e)) e <- jinteger) (- (* (expt 10 (car e)) 1.0 (car body))))
+			 ((white '#\- body <- jfixpoint) (- body))
+			 ((white '#\- body <- jinteger) (- (car body)))
 			 ((white  body <- jfixpoint (/ ('#\E) ('#\e)) e <- jinteger) (* (expt 10 (car e)) 1.0 body))
 			 ((white  body <- jinteger (/ ('#\E) ('#\e)) e <- jinteger) (* (expt 10 (car e)) 1.0 (car body)))
 			 ((white body <- jfixpoint) body)

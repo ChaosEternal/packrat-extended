@@ -180,13 +180,16 @@
 (assert-equal "write empty object" (json-roundtrip "{}") "{}")
 (assert-equal "write object" (json-roundtrip "{\"a\": 1}") "{\"a\": 1}")
 
-;; ---- 9. Negative numbers (known limitation) ----
-;; Note: the jnumber grammar does not handle a leading minus sign,
-;; so negative numbers are not supported by the parser.
+;; ---- 9. Negative numbers ----
 
-(section "Negative numbers (known limitation)")
-(assert-true "negative integer fails" (json-parse-fails? "-1"))
-(assert-true "negative float fails" (json-parse-fails? "-3.14"))
+(section "Negative numbers")
+(assert-equal "negative integer" (json-parse "-1") -1)
+(assert-equal "negative float" (json-parse "-3.14") -3.14)
+(assert-equal "negative zero" (json-parse "-0") 0)
+(assert-equal "negative scientific" (json-parse "-1e2") -100.0)
+(assert-equal "negative float scientific" (json-parse "-3.14e0") -3.14)
+(assert-equal "negative in array" (car (json-parse "[-1, 2]")) -1)
+(assert-equal "negative in object" (cdr (vector-ref (json-parse "{\"a\": -42}") 0)) -42)
 
 ;; ---- 10. Float round-trip ----
 
