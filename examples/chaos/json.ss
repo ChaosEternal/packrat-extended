@@ -41,6 +41,11 @@
   ;; JSON Structures are represented as vectors: #((symbol . value) (symbol . value) ...)
   ;; JSON Arrays are lists
   ;;
+  ;; Non-standard extensions (not valid JSON per RFC 8259, kept intentionally):
+  ;;   - Comments: /* ... */ block comments and // ... line comments are supported
+  ;;   - Leading decimal point: .5 parses as 0.5
+  ;;   - Trailing decimal point: 1. parses as 1.0
+  ;;
 
 
   (define (hashtable->vector ht)
@@ -130,6 +135,7 @@
 			       ((b <- comment) 'whitespace)
 			       )
 
+			;; Non-standard extension: C-style and line comments
 			(comment (((token "/*") b <- comment-body) b)
 				 (((token "//") b <- skip-to-newline) b)
 				 (() 'whitespace))
@@ -151,22 +157,34 @@
 						((entry <- any) (list entry)))
 			(jstring ((white '#\" body <- jstring-body '#\") (list->string body)))
 			(jnumber
-			 ((white '#\- body <- jfixpoint (/ ('#\E) ('#\e)) e <- jinteger) (- (* (expt 10 (car e)) 1.0 body)))
-			 ((white '#\- body <- jinteger (/ ('#\E) ('#\e)) e <- jinteger) (- (* (expt 10 (car e)) 1.0 (car body))))
+			 ((white '#\- body <- jfixpoint (/ ('#\E) ('#\e)) e <- jexponent) (- (* (expt 10 e) 1.0 body)))
+			 ((white '#\- body <- jsafeint (/ ('#\E) ('#\e)) e <- jexponent) (- (* (expt 10 e) 1.0 (car body))))
 			 ((white '#\- body <- jfixpoint) (- body))
-			 ((white '#\- body <- jinteger) (- (car body)))
-			 ((white  body <- jfixpoint (/ ('#\E) ('#\e)) e <- jinteger) (* (expt 10 (car e)) 1.0 body))
-			 ((white  body <- jinteger (/ ('#\E) ('#\e)) e <- jinteger) (* (expt 10 (car e)) 1.0 (car body)))
+			 ((white '#\- body <- jsafeint) (- (car body)))
+			 ((white  body <- jfixpoint (/ ('#\E) ('#\e)) e <- jexponent) (* (expt 10 e) 1.0 body))
+			 ((white  body <- jsafeint (/ ('#\E) ('#\e)) e <- jexponent) (* (expt 10 e) 1.0 (car body)))
 			 ((white body <- jfixpoint) body)
-			 ((white body <- jinteger) (car body)))
+			 ((white body <- jsafeint) (car body)))
+			;; jexponent: exponent part after e/E, supports optional +/-
+			(jexponent (('#\+ e <- jinteger) (car e))
+				   (('#\- e <- jinteger) (- (car e)))
+				   ((e <- jinteger) (car e)))
+			;; jsafeint: integer that rejects leading zeros (RFC 8259)
+			(jsafeint (('#\0 (! (? char-numeric?))) '(0 . 0))
+				  ((di <- (? char-nonzero-digit?) dr <- jinteger) (cons
+									  (+ (car dr) (* (expt 10 (+ 1 (cdr dr))) (- (char->integer di) 48) ))
+									  (+ 1 (cdr dr))))
+				  ((di <- (? char-nonzero-digit?)) (cons (- (char->integer di) 48) 0)))
 			(jinteger ((di <- (? char-numeric?) dr <- jinteger) (cons
 									  (+ (car dr) (* (expt 10 (+ 1 (cdr dr))) (- (char->integer di) 48) ))
 									  (+ 1 (cdr dr))))
 				  ((di <- (? char-numeric?)) (cons (- (char->integer di) 48) 0)) ;; 48 is (char->integer #\0)
 				  )
-			(jfixpoint ((a <- jinteger '#\. b <- jinteger) (+ (car a) (/ (car b) (expt 10 (+ 1.0 (cdr b))))))
+			;; Non-standard extensions: leading/trailing decimal point (.5, 1.)
+			;; These are intentional lenient parsing features, not valid JSON per RFC 8259.
+			(jfixpoint ((a <- jsafeint '#\. b <- jinteger) (+ (car a) (/ (car b) (expt 10 (+ 1.0 (cdr b))))))
 				   (('#\. b <- jinteger) (/ (car b) (expt 10 (+ 1.0 (cdr b)))))
-				   ((b <- jinteger '#\.) (exact->inexact (car b))))))
+				   ((b <- jsafeint '#\.) (exact->inexact (car b))))))
 
       (define (read-any p)
 	(let ((result (parser (base-generator->results (generator p)))))
