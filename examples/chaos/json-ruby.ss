@@ -136,7 +136,7 @@
 			     ((entry <- any) (list entry)))
 
      
-     (jstring ((white '#\" body <- jstring-body '#\") (list->string body))
+     (jstring ((white '#\" body <- jstring-body '#\") (jstring-body->string body))
 	      ((white '#\" '#\") ""))
      (ruby-symbol ((white (/ ('#\:) ('#\@))
 			  s <- symbol-body)

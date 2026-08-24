@@ -47,6 +47,15 @@
     (json-parse str)
     #f))
 
+;; Stricter than json-parse-fails?: the parser must reject the input itself,
+;; raising the json-read parse error, rather than dying inside a primitive
+;; such as integer->char. json-parse-fails? cannot tell those apart.
+(define (json-parse-fails-as-json-read? str)
+  (guard (exn [(and (who-condition? exn) (eq? (condition-who exn) 'json-read)) #t]
+              [#t #f])
+    (json-parse str)
+    #f))
+
 (define (section title)
   (newline)
   (display "=== ")
@@ -100,6 +109,24 @@
 (section "Unicode escapes")
 (assert-equal "unicode A" (json-parse "\"\\u0041\"") "A")
 (assert-equal "unicode euro" (json-parse "\"\\u20AC\"") "\x20AC;")
+
+(section "Surrogate pair escapes")
+;; RFC 8259 section 7: characters outside the BMP are escaped as a UTF-16
+;; surrogate pair, and each half on its own is not a Unicode scalar value.
+(assert-equal "surrogate pair G-clef" (json-parse "\"\\uD834\\uDD1E\"") "\x1D11E;")
+(assert-equal "surrogate pair in context" (json-parse "\"a\\uD834\\uDD1Eb\"") "a\x1D11E;b")
+(assert-equal "two surrogate pairs" (json-parse "\"\\uD834\\uDD1E\\uD83D\\uDE00\"") "\x1D11E;\x1F600;")
+(assert-equal "pair adjacent to BMP escape" (json-parse "\"\\u0041\\uD834\\uDD1E\"") "A\x1D11E;")
+(assert-true "lone high surrogate rejected"
+             (json-parse-fails-as-json-read? "\"\\uD834\""))
+(assert-true "lone low surrogate rejected"
+             (json-parse-fails-as-json-read? "\"\\uDD1E\""))
+(assert-true "high surrogate then BMP escape rejected"
+             (json-parse-fails-as-json-read? "\"\\uD834\\u0041\""))
+(assert-true "high surrogate then plain char rejected"
+             (json-parse-fails-as-json-read? "\"\\uD834x\""))
+(assert-true "low surrogate then high surrogate rejected"
+             (json-parse-fails-as-json-read? "\"\\uDD1E\\uD834\""))
 
 ;; ---- 3. Array parsing ----
 

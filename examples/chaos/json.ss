@@ -155,7 +155,7 @@
 				       (() '()))
 			(array-entries-nonempty ((entry <- any white '#\, entries <- array-entries-nonempty) (cons entry entries))
 						((entry <- any) (list entry)))
-			(jstring ((white '#\" body <- jstring-body '#\") (list->string body)))
+			(jstring ((white '#\" body <- jstring-body '#\") (jstring-body->string body)))
 			(jnumber
 			 ((white '#\- body <- jfixpoint (/ ('#\E) ('#\e)) e <- jexponent) (- (* (expt 10 e) 1.0 body)))
 			 ((white '#\- body <- jsafeint (/ ('#\E) ('#\e)) e <- jexponent) (- (* (expt 10 e) 1.0 (car body))))

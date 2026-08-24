@@ -31,6 +31,7 @@
 	  char-valid-hex?
 	  char-nonzero-digit?
 	  jstring-body
+	  jstring-body->string
 	  token
 	  )
   (import (packrat-ext packrat)
@@ -90,7 +91,56 @@
 				  (('#\\ '#\r) #\return)
 				  (('#\\ '#\t) #\tab)
 				  (('#\\ '#\u a <- (? char-valid-hex?) b <- (? char-valid-hex?) c <- (? char-valid-hex?) d <- (? char-valid-hex?) )
-				   (integer->char (string->number (list->string (list a b c d)) 16))))))
+				   (string->number (list->string (list a b c d)) 16)))))
+
+  ;; jstring-body yields a MIXED list: a character for every literal character
+  ;; and every single-character escape, and an exact integer for every \uXXXX
+  ;; escape. The integer is deliberately left unconverted at the point it is
+  ;; parsed, because a UTF-16 surrogate (D800-DFFF) is not a Unicode scalar
+  ;; value and integer->char raises on it. RFC 8259 section 7 escapes a
+  ;; non-BMP character as two consecutive \uXXXX escapes, so the halves can
+  ;; only be joined once the whole body is known.
+  ;;
+  ;; That join cannot be a grammar alternative. An alternative matching two
+  ;; consecutive \uXXXX escapes would also match a non-surrogate pair such as
+  ;; \u0041\u0042, and ordered choice gives its action no way to backtrack.
+  ;;
+  ;; jstring-body->string is therefore the only supported way to turn a
+  ;; jstring-body result into a string. Calling list->string on it is wrong.
+  (define (%high-surrogate? n)
+    (and (integer? n) (>= n #xD800) (<= n #xDBFF)))
+
+  (define (%low-surrogate? n)
+    (and (integer? n) (>= n #xDC00) (<= n #xDFFF)))
+
+  (define (%surrogate-error message unit)
+    (error 'json-read "JSON Parse Error"
+	   (list 'json-parse-error message unit)))
+
+  (define (jstring-body->string body)
+    (let loop ((rest body) (acc '()))
+      (cond
+       ((null? rest)
+	(list->string (reverse acc)))
+       ((char? (car rest))
+	(loop (cdr rest) (cons (car rest) acc)))
+       ((%high-surrogate? (car rest))
+	(let ((high (car rest))
+	      (tail (cdr rest)))
+	  (if (and (pair? tail) (%low-surrogate? (car tail)))
+	      (loop (cdr tail)
+		    (cons (integer->char
+			   (+ #x10000
+			      (* (- high #xD800) #x400)
+			      (- (car tail) #xDC00)))
+			  acc))
+	      (%surrogate-error "high surrogate not followed by a low surrogate"
+				high))))
+       ((%low-surrogate? (car rest))
+	(%surrogate-error "low surrogate not preceded by a high surrogate"
+			  (car rest)))
+       (else
+	(loop (cdr rest) (cons (integer->char (car rest)) acc))))))
   (define (token str . comp?)
     (let ((cmp? (if (null? comp?)
 		    char=?
