@@ -76,12 +76,26 @@
     (lambda (y)
       (char-ci=? x y)))
 
+  ;; RFC 8259 section 7 gives the set of characters a JSON string may carry
+  ;; literally as
+  ;;
+  ;;   unescaped = %x20-21 / %x23-5B / %x5D-10FFFF
+  ;;
+  ;; so U+0000 through U+001F must be written as an escape, and the two holes
+  ;; at %x22 and %x5C are quote and backslash, which have escapes of their own.
+  ;; Everything from U+0020 up is allowed as-is, including U+007F, which JSON
+  ;; does not treat as a control character.
+  (define (json-unescaped-char? c)
+    (and (char>=? c #\space)
+	 (not (char=? c #\"))
+	 (not (char=? c #\\))))
+
   (define jstring-body
     (packrat-parser any
 		    (any ((c <- jstring-char s <- any) (cons c s))
 			 ((c <- jstring-char) (cons c '()))
 			 (() '()))
-		    (jstring-char (((! '#\\) (! '#\") c <- (? true)) c)
+		    (jstring-char ((c <- (? json-unescaped-char?)) c)
 				  (('#\\ '#\") #\")
 				  (('#\\ '#\\) #\\)
 				  (('#\\ '#\/) #\/)

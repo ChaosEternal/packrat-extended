@@ -376,6 +376,82 @@
 (let ((result (json-parse "{\"a\": 1, \"a\": 2}")))
   (assert-equal "duplicate keys - count" (vector-length result) 2))
 
+;; ---- Unescaped control characters in strings (PE-101, RFC 8259 section 7) ----
+;;
+;; The `unescaped` production is %x20-21 / %x23-5B / %x5D-10FFFF, so every
+;; character below U+0020 MUST appear as an escape. Quote and backslash are
+;; excluded from the range too, and both already have their own escapes.
+
+(define (ctrl n) (integer->char n))
+
+(define (quoted . parts)
+  (apply string-append (append (list "\"") parts (list "\""))))
+
+(define (ctrl-string n)
+  (quoted "a" (string (ctrl n)) "b"))
+
+(assert-true "raw newline in a string is rejected"
+  (json-parse-fails-as-json-read? (ctrl-string 10)))
+
+(assert-true "raw tab in a string is rejected"
+  (json-parse-fails-as-json-read? (ctrl-string 9)))
+
+(assert-true "raw carriage return in a string is rejected"
+  (json-parse-fails-as-json-read? (ctrl-string 13)))
+
+(assert-true "raw U+0000 in a string is rejected"
+  (json-parse-fails-as-json-read? (ctrl-string 0)))
+
+(assert-true "raw U+0001 in a string is rejected"
+  (json-parse-fails-as-json-read? (ctrl-string 1)))
+
+(assert-true "raw U+001F in a string is rejected"
+  (json-parse-fails-as-json-read? (ctrl-string 31)))
+
+;; Sweep the whole forbidden range rather than sampling it, so a fix that
+;; guards only the familiar escapes cannot pass.
+(assert-true "every raw character U+0000-U+001F is rejected"
+  (let loop ((n 0))
+    (cond ((> n 31) #t)
+          ((json-parse-fails-as-json-read? (ctrl-string n)) (loop (+ n 1)))
+          (else n))))
+
+;; A control character is forbidden wherever a string can appear, including an
+;; object member name and a string nested in an array.
+(assert-true "raw newline in an object key is rejected"
+  (json-parse-fails-as-json-read?
+    (string-append "{" (quoted "a" (string (ctrl 10)) "b") ": 1}")))
+
+(assert-true "raw newline in an array element is rejected"
+  (json-parse-fails-as-json-read?
+    (string-append "[" (ctrl-string 10) "]")))
+
+;; U+0020 is the first allowed character and U+007F is not a JSON control
+;; character at all, so neither may be caught by an off-by-one guard.
+(assert-equal "space is still allowed raw in a string"
+  (json-parse (quoted "a b")) "a b")
+
+(assert-equal "U+007F is still allowed raw in a string"
+  (json-parse (quoted (string (ctrl 127))))
+  (string (ctrl 127)))
+
+;; The escaped forms of the same characters must keep working.
+(assert-equal "escaped newline still parses" (json-parse "\"a\\nb\"") "a\nb")
+(assert-equal "escaped tab still parses" (json-parse "\"a\\tb\"") "a\tb")
+(assert-equal "escaped \\u0001 still parses"
+  (json-parse "\"a\\u0001b\"")
+  (string-append "a" (string (ctrl 1)) "b"))
+
+;; A control character outside a string is a separate defect (PE-104) and must
+;; not be swept up here: whitespace stays whitespace.
+(assert-equal "a newline between tokens is still whitespace"
+  (json-parse "[1,\n2]") '(1 2))
+
+;; Rejecting the U+0004 that json-read uses as its end-of-input sentinel must
+;; not change how an unterminated string fails.
+(assert-true "unterminated string still raises the json-read parse error"
+  (json-parse-fails-as-json-read? "\"abc"))
+
 ;; ---- Summary ----
 
 (newline)
