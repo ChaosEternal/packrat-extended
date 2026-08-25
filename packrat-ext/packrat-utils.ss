@@ -30,6 +30,7 @@
 	  char-newline?
 	  char-valid-hex?
 	  char-nonzero-digit?
+	  json-token-char?
 	  jstring-body
 	  jstring-body->string
 	  token
@@ -57,7 +58,27 @@
 
   (define (char-nonzero-digit? x)
     (and (char>=? x #\1) (char<=? x #\9)))
-  
+
+  ;; RFC 8259 has no delimiter production. true, false, null and a number are
+  ;; whole tokens, and the surrounding grammar is what ends them, so a parser
+  ;; that stops the moment a token's own characters run out reads `truex` as
+  ;; `true` and `0x10` as `0` -- splitting one malformed token into a value
+  ;; plus trailing junk.
+  ;;
+  ;; This is the set of characters that can continue such a token: the letters
+  ;; that spell a literal or an exponent marker, the digits, and a number's
+  ;; sign and decimal point. None of them may legitimately follow a value in
+  ;; JSON, where only whitespace and the structural characters , ] } can, so a
+  ;; negative lookahead on this predicate rejects the split without narrowing
+  ;; any valid document.
+  (define (json-token-char? c)
+    (or (char-alphabetic? c)
+	(char-numeric? c)
+	(char=? c #\.)
+	(char=? c #\+)
+	(char=? c #\-)))
+
+
   (define char-valid-hex?
     (test-any
      char-numeric?

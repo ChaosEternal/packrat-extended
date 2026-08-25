@@ -77,6 +77,17 @@ Within rules you can:
 ;; => #(("key" . (1 2 #t)))
 ```
 
+`json-read` stops as soon as the first complete value has been read and leaves
+the rest of the port alone, so successive calls read successive values out of
+one stream. Use `json-read-document` when the port is expected to hold one
+whole document and nothing else: it reads one value, allows trailing
+whitespace and comments, and raises a parse error on anything else.
+
+```scheme
+(json-read (open-input-string "[1] trailing junk"))          ;; => (1)
+(json-read-document (open-input-string "[1] trailing junk")) ;; => parse error
+```
+
 ### Template Engine
 
 Templates use `{%` / `%}` delimiters with support for value interpolation,
