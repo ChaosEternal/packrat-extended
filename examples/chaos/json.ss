@@ -206,9 +206,19 @@
 				 (() 'whitespace))
 			(comment-body (((token "*/") w <- white) w)
 				      (((? true) comment-body) 'skipped-comment-char))
-			(skip-to-newline (((? (inverse char-newline?))
+			;; A line comment ends at a newline or at end of input,
+			;; and the last line of a file often has no newline.
+			;; The character-consuming alternative therefore stops
+			;; short of the #\x04 end-of-input token rather than
+			;; consuming it, so the empty alternative ends the
+			;; comment and leaves that token for `document`.
+			;; A raw U+0004 in the middle of a line comment ends it
+			;; early, which is the sentinel aliasing of PE-104 and
+			;; not something this rule can fix on its own.
+			(skip-to-newline (((? char-newline?) white) 'whitespace)
+					 (((! '#\x04) (? true)
 					   skip-to-newline) 'whitespace)
-					 (((? char-newline?) white) 'whitespace)
+					 (() 'whitespace)
 					 )
 			
 			(table-entries ((a <- table-entries-nonempty) a)

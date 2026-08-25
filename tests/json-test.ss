@@ -452,7 +452,7 @@
 (assert-true "unterminated string still raises the json-read parse error"
   (json-parse-fails-as-json-read? "\"abc"))
 
-;; ---- 12. Literal and number delimiting (PE-102, first half) ----
+;; ---- 18. Literal and number delimiting (PE-102, first half) ----
 
 (section "Undelimited literals are rejected")
 
@@ -499,7 +499,7 @@
 (assert-equal "a comment may follow a literal" (json-parse "[true/*c*/]") '(#t))
 (assert-equal "a comment may follow a number" (json-parse "[1//c\n]") '(1))
 
-;; ---- 13. Whole-document reading (PE-102, second half) ----
+;; ---- 19. Whole-document reading (PE-102, second half) ----
 
 (define (json-parse-document str)
   (json-read-document (open-string-input-port str)))
@@ -547,6 +547,16 @@
   (json-parse-document "[1] /* done */") '(1))
 (assert-equal "a trailing line comment is allowed"
   (json-parse-document "[1] // done\n") '(1))
+;; A file whose last line is a comment and which has no final newline is the
+;; ordinary case, not a contrived one. skip-to-newline used to demand a real
+;; newline, so the line comment never parsed as whitespace at all; json-read
+;; never noticed because it stops at the value and ignores the rest.
+(assert-equal "a trailing line comment needs no final newline"
+  (json-parse-document "[1] // done") '(1))
+(assert-equal "an empty trailing line comment is allowed"
+  (json-parse-document "[1] //") '(1))
+(assert-equal "a line comment at end of input is whitespace to json-read too"
+  (eof-object? (json-parse "// done")) #t)
 
 (assert-true "trailing junk is rejected"
   (json-document-fails-as-json-read? "{\"a\":1} garbage"))

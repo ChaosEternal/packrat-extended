@@ -79,7 +79,10 @@ Within rules you can:
 
 `json-read` stops as soon as the first complete value has been read and leaves
 the rest of the port alone, so successive calls read successive values out of
-one stream. Use `json-read-document` when the port is expected to hold one
+one stream. The parser looks one character past a value to know it has ended,
+and that character is consumed, so successive values must be separated by
+whitespace: `"1 2 3"` reads as three values, `"[1][2]"` loses the `[` of the
+second. Use `json-read-document` when the port is expected to hold one
 whole document and nothing else: it reads one value, allows trailing
 whitespace and comments, and raises a parse error on anything else.
 

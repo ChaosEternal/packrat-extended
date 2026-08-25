@@ -65,9 +65,12 @@
   ;; `true` and `0x10` as `0` -- splitting one malformed token into a value
   ;; plus trailing junk.
   ;;
-  ;; This is the set of characters that can continue such a token: the letters
-  ;; that spell a literal or an exponent marker, the digits, and a number's
-  ;; sign and decimal point. None of them may legitimately follow a value in
+  ;; This is the set of characters that can continue such a token: letters,
+  ;; digits, and a number's sign and decimal point. The two character classes
+  ;; are the Unicode-wide char-alphabetic? and char-numeric?, which is wider
+  ;; than the ASCII a JSON token can actually contain, and deliberately so --
+  ;; the set only ever has to be a superset to do its job. None of these
+  ;; characters may legitimately follow a value in
   ;; JSON, where only whitespace and the structural characters , ] } can, so a
   ;; negative lookahead on this predicate rejects the split without narrowing
   ;; any valid document.
