@@ -83,6 +83,19 @@
 	 s)
 	(display "\"" p))
 
+      ;; Chez prints a subnormal flonum with its precision attached, as in
+      ;; 1e-308|51, and that bar is not JSON. The digits before it are the
+      ;; shortest that read back as the same double, so drop the annotation.
+      ;; No other number printed here can contain a bar.
+      (define (number->json-string x)
+	(let* ((s (number->string x))
+	       (n (string-length s)))
+	  (let loop ((i 0))
+	    (cond
+	     ((= i n) s)
+	     ((char=? (string-ref s i) #\|) (substring s 0 i))
+	     (else (loop (+ i 1)))))))
+
       ;; A JSON number is a decimal literal, so an exact rational such as 1/3,
       ;; a non-finite flonum such as +inf.0 and a complex number have no JSON
       ;; syntax at all. R6RS `write` prints Scheme syntax for each, which
@@ -92,7 +105,7 @@
 		(and (exact? x) (not (integer? x)))
 		(and (inexact? x) (not (finite? x))))
 	    (error 'json-write "Number has no JSON representation in json-write" x)
-	    (write x p)))
+	    (display (number->json-string x) p)))
 
       (define (write-ht vec p)
 	(display "{" p)

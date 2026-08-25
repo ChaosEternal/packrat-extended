@@ -36,11 +36,13 @@
 (define (json-parse str)
   (json-read (open-string-input-port str)))
 
+(define (json-write-to-string x)
+  (let-values (((port extract) (open-string-output-port)))
+    (json-write x port)
+    (extract)))
+
 (define (json-roundtrip str)
-  (let ((parsed (json-parse str)))
-    (let-values (((port extract) (open-string-output-port)))
-      (json-write parsed port)
-      (extract))))
+  (json-write-to-string (json-parse str)))
 
 (define (json-parse-fails? str)
   (guard (exn [#t #t])
@@ -306,7 +308,11 @@
 (section "json-write output is re-readable")
 ;; The defect PE-103 names: parse a document the parser accepts, write it, and
 ;; the result must parse back to the same value.
-(define (json-reread str) (json-parse (json-roundtrip str)))
+;; Guarded so a regression here fails its own assertion instead of aborting
+;; the run and hiding every later section.
+(define (json-reread str)
+  (guard (exn [#t 'reread-failed])
+    (json-parse (json-roundtrip str))))
 (assert-equal "reread control char" (json-reread "\"a\\u0001b\"") "a\x1;b")
 (assert-equal "reread NUL" (json-reread "\"\\u0000\"") "\x0;")
 (assert-equal "reread newline" (json-reread "\"a\\nb\"") "a\nb")
@@ -336,6 +342,20 @@
 ;; PE-105 (still open) is why this checks the written text rather than the
 ;; re-read value: "100.0" re-reads as an exact 100, which is a reader defect.
 (assert-equal "exponent writes as a JSON decimal" (json-roundtrip "1e2") "100.0")
+;; Chez prints a subnormal double with its precision attached, as 1e-308|51.
+;; These assert the emitted TEXT, because the bar is a syntax defect that
+;; re-reading alone does not always catch: at top level "5e-324|1" parses
+;; back to 0.0 without an error, silently corrupting the value.
+(assert-equal "subnormal writes without a precision bar"
+  (json-roundtrip "1e-308") "1e-308")
+;; Fed straight to the writer, because the reader underflows the literal
+;; "5e-324" to 0.0 -- a reader-side precision quirk this item does not touch.
+(assert-equal "smallest subnormal writes without a precision bar"
+  (json-write-to-string 4.9406564584124654e-324) "5e-324")
+(assert-equal "subnormal in array writes without a precision bar"
+  (json-roundtrip "[1e-320]") "[1e-320]")
+(assert-equal "subnormal survives a re-read" (json-reread "[1e-308]") (list 1e-308))
+(assert-equal "normal small flonum unaffected" (json-roundtrip "1e-300") "1e-300")
 
 ;; ---- 17. Edge cases ----
 
