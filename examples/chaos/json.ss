@@ -161,21 +161,23 @@
   ;; is how one grammar serves two entry points.
   (define json-readers
     (let ()
+      ;; End of input is the ABSENCE of a token, not a token. Yielding #f here
+      ;; makes base-generator->results end the chain, and a grammar rule can
+      ;; match that end by asking for the token kind #f, which no character
+      ;; can equal. Yielding a real character instead -- this generator used to
+      ;; yield #\x04 -- makes the sentinel forgeable: a U+0004 present in the
+      ;; stream is then indistinguishable from the end of the stream, and
+      ;; `[<U+0004>]` reads as a one-element list holding the end-of-file
+      ;; object, which is not a value any JSON document can denote (PE-104).
       (define (generator p)
-	(let ((ateof #f)
-	      (pos (top-parse-position "<?>")))
+	(let ((pos (top-parse-position "<?>")))
 	  (lambda ()
-	    (if ateof
-		(values pos #f)
-		(let ((x (read-char p)))
-		  (if (eof-object? x)
-		      (begin
-			(set! ateof #t)
-			(values pos (cons #\x04 #\x04))
-			)
-		      (let ((old-pos pos))
-			(set! pos (update-parse-position pos x))
-			(values old-pos (cons x x)))))))))
+	    (let ((x (read-char p)))
+	      (if (eof-object? x)
+		  (values pos #f)
+		  (let ((old-pos pos))
+		    (set! pos (update-parse-position pos x))
+		    (values old-pos (cons x x))))))))
       (define parsers
 	(packrat-parser
 			(cons any document)
@@ -186,15 +188,28 @@
 			;; may read successive values out of one stream.
 			;; `document` is the same value followed by end of
 			;; input, for a caller reading a whole document.
-			(document ((v <- any white '#\x04) v))
-			(any ((white '#\{ entries <- table-entries white '#\}) (list->vector entries))
-			     ((white '#\[ entries <- array-entries white '#\]) entries)
-			     ((s <- jstring) s)
-			     ((n <- jnumber) n)
-			     ((white (token "true") (! (? json-token-char?))) #t)
-			     ((white (token "false") (! (? json-token-char?))) #f)
-			     ((white (token "null") (! (? json-token-char?))) (make-json-null))
-			     ((white '#\x04) (eof-object)))
+			(document ((v <- value white '#f) v))
+			;; `value` is the JSON values proper. `any` is `value`
+			;; plus the empty stream, which json-read reports as
+			;; the end-of-file object so that a caller reading
+			;; successive values from one port can tell when to
+			;; stop. That alternative belongs to json-read alone:
+			;; the end-of-file object is not a JSON value, so it
+			;; must not be what a whole document reads as, nor
+			;; appear as an array element or an object value.
+			;; Matching the end of input consumes nothing and so
+			;; succeeds repeatedly, which is why `document` cannot
+			;; be built on `any` -- it would read empty input as a
+			;; document whose value is the end-of-file object.
+			(any ((v <- value) v)
+			     ((white '#f) (eof-object)))
+			(value ((white '#\{ entries <- table-entries white '#\}) (list->vector entries))
+			       ((white '#\[ entries <- array-entries white '#\]) entries)
+			       ((s <- jstring) s)
+			       ((n <- jnumber) n)
+			       ((white (token "true") (! (? json-token-char?))) #t)
+			       ((white (token "false") (! (? json-token-char?))) #f)
+			       ((white (token "null") (! (? json-token-char?))) (make-json-null)))
 			(white ((a <- (? char-whitespace?) white) 'whitespace)
 			       ((b <- (? char-whitespace?)) 'whitespace)
 			       ((b <- comment) 'whitespace)
@@ -208,16 +223,13 @@
 				      (((? true) comment-body) 'skipped-comment-char))
 			;; A line comment ends at a newline or at end of input,
 			;; and the last line of a file often has no newline.
-			;; The character-consuming alternative therefore stops
-			;; short of the #\x04 end-of-input token rather than
-			;; consuming it, so the empty alternative ends the
-			;; comment and leaves that token for `document`.
-			;; A raw U+0004 in the middle of a line comment ends it
-			;; early, which is the sentinel aliasing of PE-104 and
-			;; not something this rule can fix on its own.
+			;; The character-consuming alternative simply fails
+			;; once there is no character left, and the empty
+			;; alternative ends the comment. It needs no guard
+			;; against the end of input, because the end of input
+			;; is no longer a character it could consume.
 			(skip-to-newline (((? char-newline?) white) 'whitespace)
-					 (((! '#\x04) (? true)
-					   skip-to-newline) 'whitespace)
+					 (((? true) skip-to-newline) 'whitespace)
 					 (() 'whitespace)
 					 )
 			
@@ -225,11 +237,11 @@
 				       (() '()))
 			(table-entries-nonempty ((entry <- table-entry white '#\, entries <- table-entries-nonempty) (cons entry entries))
 						((entry <- table-entry) (list entry)))
-			(table-entry ((key <- jstring white '#\: val <- any) (cons key val)))
+			(table-entry ((key <- jstring white '#\: val <- value) (cons key val)))
 			(array-entries ((a <- array-entries-nonempty) a)
 				       (() '()))
-			(array-entries-nonempty ((entry <- any white '#\, entries <- array-entries-nonempty) (cons entry entries))
-						((entry <- any) (list entry)))
+			(array-entries-nonempty ((entry <- value white '#\, entries <- array-entries-nonempty) (cons entry entries))
+						((entry <- value) (list entry)))
 			(jstring ((white '#\" body <- jstring-body '#\") (jstring-body->string body)))
 			;; A number is delimited the same way a literal is: the
 			;; longest alternative that matches wins, and whatever

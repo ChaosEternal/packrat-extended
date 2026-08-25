@@ -598,6 +598,73 @@
 (assert-equal "nested structures read the same way through both entry points"
   (json-parse-document "{\"a\":[1,{\"b\":null}],\"c\":\"x\"}")
   (json-parse "{\"a\":[1,{\"b\":null}],\"c\":\"x\"}"))
+
+;; ---- 20. The end-of-input sentinel is unforgeable (PE-104) ----
+
+;; The generator used to signal end of input by yielding a real #\x04
+;; character, and the grammar matched that character. A U+0004 actually
+;; present in the stream was therefore indistinguishable from the end of it,
+;; so it read as the end-of-file OBJECT in value position -- a value no JSON
+;; document can denote. End of input is now the absence of a token rather than
+;; a token, which no input can forge.
+(section "Raw U+0004 is data, not end of input")
+(assert-true "bare U+0004 is a parse error"
+  (json-parse-fails-as-json-read? "\x4;"))
+(assert-true "U+0004 in array position is a parse error"
+  (json-parse-fails-as-json-read? "[\x4;]"))
+(assert-true "U+0004 as an object value is a parse error"
+  (json-parse-fails-as-json-read? "{\"a\":\x4;}"))
+(assert-true "U+0004 after a complete document is rejected by the document reader"
+  (json-document-fails-as-json-read? "[1]\x4;junk"))
+(assert-true "U+0004 after a bare literal is rejected by the document reader"
+  (json-document-fails-as-json-read? "true\x4;x"))
+
+;; A line comment runs to the end of the line or to the end of input, and the
+;; aliasing gave a raw U+0004 the power to end one early -- which smuggled the
+;; rest of the commented-out line back out as document text and made this a
+;; parse error. A U+0004 is now just another character the comment swallows,
+;; so the whole tail stays commented out and the document is the array alone.
+(assert-equal "U+0004 does not end a line comment early"
+  (json-parse-document "[1] // a\x4;junk") '(1))
+(assert-equal "a U+0004 in a line comment reads like any other character"
+  (json-parse-document "[1] // a\x4;junk")
+  (json-parse-document "[1] // a-junk"))
+;; A block comment ends at its own delimiter and never cared about the
+;; sentinel, so this stays an unterminated comment and therefore an error.
+(assert-true "U+0004 does not terminate a block comment"
+  (json-document-fails-as-json-read? "[1] /* a\x4;junk"))
+
+;; PE-101 rejects raw control characters inside strings, which hides the
+;; value-position symptom but not the aliasing. Guard that it stays rejected.
+(assert-true "U+0004 inside a string is still a parse error"
+  (json-parse-fails-as-json-read? "\"a\x4;b\""))
+
+;; Genuine end of input must still be recognised everywhere it was before.
+;; These all pass before this change and are regression guards rather than new
+;; behaviour: json-read returns the end-of-file object for an empty stream,
+;; and PE-102 made a trailing line comment with no final newline legal.
+(section "Genuine end of input still reads as end of input")
+(assert-true "empty input is the end-of-file object"
+  (eof-object? (json-parse "")))
+(assert-true "whitespace-only input is the end-of-file object"
+  (eof-object? (json-parse "   \n\t ")))
+(assert-true "a line comment with no newline is the end-of-file object"
+  (eof-object? (json-parse "// x")))
+(assert-true "a line comment with a newline is the end-of-file object"
+  (eof-object? (json-parse "// x\n")))
+(assert-true "a block comment alone is the end-of-file object"
+  (eof-object? (json-parse "/* x */")))
+(assert-equal "a trailing line comment with no newline is a whole document"
+  (json-parse-document "[1] // done") '(1))
+(assert-equal "a trailing line comment with a newline is a whole document"
+  (json-parse-document "[1] // done\n") '(1))
+(assert-equal "a trailing block comment is a whole document"
+  (json-parse-document "[1] /* done */") '(1))
+(assert-true "empty input is not a whole document"
+  (json-document-fails-as-json-read? ""))
+(assert-equal "a value at the very end of input needs no trailing character"
+  (json-parse-document "42") 42)
+
 ;; ---- Summary ----
 
 (newline)
