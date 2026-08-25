@@ -677,6 +677,109 @@
 (assert-equal "a value at the very end of input needs no trailing character"
   (json-parse-document "42") 42)
 
+;; ---- 20. Fractional literals and flonum round-tripping (PE-105) ----
+
+;; A numeric literal reads inexact whenever it carries a fraction part or an
+;; exponent part, and exact only when it is a bare integer literal. Before this
+;; change `1.0` read as exact 1, because the fraction was built as
+;; (/ 0 (expt 10 1.0)) and Chez keeps exact zero divided by a flonum exact.
+(section "A fraction part or an exponent part makes a literal inexact")
+(assert-true "1.0 is inexact" (inexact? (json-parse "1.0")))
+(assert-equal "1.0 reads as 1.0" (json-parse "1.0") 1.0)
+(assert-true "0.0 is inexact" (inexact? (json-parse "0.0")))
+(assert-equal "0.0 reads as 0.0" (json-parse "0.0") 0.0)
+(assert-true "-0.0 is inexact" (inexact? (json-parse "-0.0")))
+(assert-equal "-0.0 keeps its sign" (json-parse "-0.0") -0.0)
+(assert-true "-1.0 is inexact" (inexact? (json-parse "-1.0")))
+(assert-equal "-1.0 reads as -1.0" (json-parse "-1.0") -1.0)
+(assert-true "a leading decimal point is inexact" (inexact? (json-parse ".0")))
+(assert-equal ".0 reads as 0.0" (json-parse ".0") 0.0)
+(assert-true "a trailing decimal point is inexact" (inexact? (json-parse "1.")))
+(assert-equal "1. reads as 1.0" (json-parse "1.") 1.0)
+(assert-true "a trailing zero fraction is inexact" (inexact? (json-parse "12.00")))
+(assert-equal "12.00 reads as 12.0" (json-parse "12.00") 12.0)
+(assert-true "an exponent alone is inexact" (inexact? (json-parse "1e2")))
+(assert-equal "1e2 reads as 100.0" (json-parse "1e2") 100.0)
+(assert-true "a fraction with an exponent is inexact" (inexact? (json-parse "1.0e0")))
+(assert-equal "1.0e0 reads as 1.0" (json-parse "1.0e0") 1.0)
+
+;; The other half of the rule: a bare integer literal stays exact, so the fix
+;; must not make every number a flonum.
+(section "A bare integer literal stays exact")
+(assert-true "1 is exact" (exact? (json-parse "1")))
+(assert-equal "1 reads as 1" (json-parse "1") 1)
+(assert-true "0 is exact" (exact? (json-parse "0")))
+(assert-true "-1 is exact" (exact? (json-parse "-1")))
+(assert-equal "-1 reads as -1" (json-parse "-1") -1)
+(assert-true "a bignum literal is exact"
+  (exact? (json-parse "123456789012345678901234567890")))
+(assert-equal "a bignum literal keeps every digit"
+  (json-parse "123456789012345678901234567890") 123456789012345678901234567890)
+
+;; Reading a flonum back must give the same double, bit for bit. The old
+;; construction divided by (expt 10 n) in floating point, so it rounded twice
+;; and lost the last bits on most inputs. Building the exact rational and
+;; converting once rounds correctly.
+;; Chez prints a flonum whose precision is below 53 bits with a "|bits" suffix,
+;; which is not JSON, so the digits before the bar are what gets parsed. They
+;; are still the shortest round-tripping digits for that value.
+(define (flonum->json-string x)
+  (let* ((s (number->string x))
+         (n (string-length s)))
+    (let loop ((i 0))
+      (cond ((= i n) s)
+            ((char=? (string-ref s i) #\|) (substring s 0 i))
+            (else (loop (+ i 1)))))))
+
+(define (round-trips? x)
+  (eqv? x (json-parse (flonum->json-string x))))
+
+(define (count-failures xs)
+  (let loop ((xs xs) (bad 0) (first-bad #f))
+    (cond ((null? xs) (cons bad first-bad))
+          ((round-trips? (car xs)) (loop (cdr xs) bad first-bad))
+          (else (loop (cdr xs) (+ bad 1) (or first-bad (car xs)))))))
+
+(define (assert-all-round-trip label xs)
+  (let ((r (count-failures xs)))
+    (if (= (car r) 0)
+        (assert-equal label 'all-round-trip 'all-round-trip)
+        (assert-equal (string-append label
+                                     " (first bad: "
+                                     (number->string (cdr r))
+                                     ")")
+                      (car r) 0))))
+
+(define min-subnormal (inexact (/ 1 (expt 2 1074))))
+
+;; A deterministic linear congruential generator, so a failure is reproducible.
+(define lcg-state 12345)
+(define (next-random! m)
+  (set! lcg-state (mod (+ (* 6364136223846793005 lcg-state) 1442695040888963407)
+                       (expt 2 64)))
+  (mod (div lcg-state 1024) m))
+
+(define (build n thunk)
+  (let loop ((i 0) (acc '()))
+    (if (= i n) acc (loop (+ i 1) (cons (thunk) acc)))))
+
+(section "Reading a flonum back gives the same double")
+(assert-all-round-trip "hand-picked hard cases"
+  (list 0.1 0.2 0.3 3.141592653589793 2.718281828459045
+        1.7976931348623157e308 2.2250738585072014e-308
+        min-subnormal (* 3.0 min-subnormal)
+        1e-320 5e-16 9007199254740993.0 0.5 -0.1 -1e-320))
+(assert-all-round-trip "2000 subnormals"
+  (build 2000 (lambda () (* min-subnormal (inexact (+ 1 (next-random! 4503599627370495)))))))
+(assert-all-round-trip "2000 random normals"
+  (build 2000 (lambda ()
+                (inexact (/ (+ 1 (next-random! (expt 2 53)))
+                                   (+ 1 (next-random! (expt 2 53))))))))
+(assert-all-round-trip "2000 random powers of ten"
+  (build 2000 (lambda ()
+                (inexact (* (+ 1 (next-random! (expt 2 53)))
+                                   (expt 10 (- (next-random! 60) 30)))))))
+
 ;; ---- Summary ----
 
 (newline)
