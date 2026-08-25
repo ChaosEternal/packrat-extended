@@ -256,14 +256,24 @@
 			;; jnumber-token once it has succeeded, `0x10` fails
 			;; outright rather than falling back to a shorter match.
 			(jnumber ((n <- jnumber-token (! (? json-token-char?))) n))
+			;; A literal reads inexact whenever it carries a fraction
+			;; part or an exponent part, and exact only when it is a
+			;; bare integer. Every inexact alternative builds the
+			;; exact rational the digits denote and converts it once,
+			;; at the end. Rounding once is what makes the result the
+			;; nearest double: multiplying or dividing by a flonum
+			;; power of ten part-way through rounds twice and loses
+			;; the last bits, and it also let `1.0` stay exact,
+			;; because exact zero divided by a flonum is exact zero
+			;; in Chez.
 			(jnumber-token
-			 ((white '#\- body <- jfixpoint (/ ('#\E) ('#\e)) e <- jexponent) (- (* (expt 10 e) 1.0 body)))
-			 ((white '#\- body <- jsafeint (/ ('#\E) ('#\e)) e <- jexponent) (- (* (expt 10 e) 1.0 (car body))))
-			 ((white '#\- body <- jfixpoint) (- body))
+			 ((white '#\- body <- jfixpoint (/ ('#\E) ('#\e)) e <- jexponent) (- (exact->inexact (* (expt 10 e) body))))
+			 ((white '#\- body <- jsafeint (/ ('#\E) ('#\e)) e <- jexponent) (- (exact->inexact (* (expt 10 e) (car body)))))
+			 ((white '#\- body <- jfixpoint) (- (exact->inexact body)))
 			 ((white '#\- body <- jsafeint) (- (car body)))
-			 ((white  body <- jfixpoint (/ ('#\E) ('#\e)) e <- jexponent) (* (expt 10 e) 1.0 body))
-			 ((white  body <- jsafeint (/ ('#\E) ('#\e)) e <- jexponent) (* (expt 10 e) 1.0 (car body)))
-			 ((white body <- jfixpoint) body)
+			 ((white  body <- jfixpoint (/ ('#\E) ('#\e)) e <- jexponent) (exact->inexact (* (expt 10 e) body)))
+			 ((white  body <- jsafeint (/ ('#\E) ('#\e)) e <- jexponent) (exact->inexact (* (expt 10 e) (car body))))
+			 ((white body <- jfixpoint) (exact->inexact body))
 			 ((white body <- jsafeint) (car body)))
 			;; jexponent: exponent part after e/E, supports optional +/-
 			(jexponent (('#\+ e <- jinteger) (car e))
@@ -282,9 +292,11 @@
 				  )
 			;; Non-standard extensions: leading/trailing decimal point (.5, 1.)
 			;; These are intentional lenient parsing features, not valid JSON per RFC 8259.
-			(jfixpoint ((a <- jsafeint '#\. b <- jinteger) (+ (car a) (/ (car b) (expt 10 (+ 1.0 (cdr b))))))
-				   (('#\. b <- jinteger) (/ (car b) (expt 10 (+ 1.0 (cdr b)))))
-				   ((b <- jsafeint '#\.) (exact->inexact (car b))))))
+			;; jfixpoint stays exact and jnumber-token converts. The
+			;; inexactness belongs to the literal, not to this rule.
+			(jfixpoint ((a <- jsafeint '#\. b <- jinteger) (+ (car a) (/ (car b) (expt 10 (+ 1 (cdr b))))))
+				   (('#\. b <- jinteger) (/ (car b) (expt 10 (+ 1 (cdr b)))))
+				   ((b <- jsafeint '#\.) (car b)))))
 
       (define (read-with parse p)
 	(let ((result (parse (base-generator->results (generator p)))))
