@@ -56,6 +56,57 @@
 
   (define json-write
     (let ()
+      ;; JSON has no syntax for Scheme's \xNN; escape, so a string cannot go
+      ;; through R6RS `write`: a control character comes back out as "\x1;",
+      ;; which json-read then rejects. RFC 8259 s7 requires U+0000-U+001F,
+      ;; the quote and the backslash to be escaped, and permits everything
+      ;; else raw.
+      (define (write-json-string s p)
+	(display "\"" p)
+	(string-for-each
+	 (lambda (c)
+	   (let ((n (char->integer c)))
+	     (cond
+	      ((char=? c #\") (display "\\\"" p))
+	      ((char=? c #\\) (display "\\\\" p))
+	      ((= n 8) (display "\\b" p))
+	      ((= n 9) (display "\\t" p))
+	      ((= n 10) (display "\\n" p))
+	      ((= n 12) (display "\\f" p))
+	      ((= n 13) (display "\\r" p))
+	      ((< n #x20)
+	       (display "\\u" p)
+	       (let ((hex (string-downcase (number->string n 16))))
+		 (display (make-string (- 4 (string-length hex)) #\0) p)
+		 (display hex p)))
+	      (else (write-char c p)))))
+	 s)
+	(display "\"" p))
+
+      ;; Chez prints a subnormal flonum with its precision attached, as in
+      ;; 1e-308|51, and that bar is not JSON. The digits before it are the
+      ;; shortest that read back as the same double, so drop the annotation.
+      ;; No other number printed here can contain a bar.
+      (define (number->json-string x)
+	(let* ((s (number->string x))
+	       (n (string-length s)))
+	  (let loop ((i 0))
+	    (cond
+	     ((= i n) s)
+	     ((char=? (string-ref s i) #\|) (substring s 0 i))
+	     (else (loop (+ i 1)))))))
+
+      ;; A JSON number is a decimal literal, so an exact rational such as 1/3,
+      ;; a non-finite flonum such as +inf.0 and a complex number have no JSON
+      ;; syntax at all. R6RS `write` prints Scheme syntax for each, which
+      ;; json-read cannot read back, so raise instead of emitting it.
+      (define (write-number x p)
+	(if (or (not (real? x))
+		(and (exact? x) (not (integer? x)))
+		(and (inexact? x) (not (finite? x))))
+	    (error 'json-write "Number has no JSON representation in json-write" x)
+	    (display (number->json-string x) p)))
+
       (define (write-ht vec p)
 	(display "{" p)
 	(do ((need-comma #f #t)
@@ -68,8 +119,8 @@
 		 (k (car entry))
 		 (v (cdr entry)))
 	    (cond
-	     ((symbol? k) (write (symbol->string k) p))
-	     ((string? k) (write k p)) ;; for convenience
+	     ((symbol? k) (write-json-string (symbol->string k) p))
+	     ((string? k) (write-json-string k p)) ;; for convenience
 	     (else (error 'json-write "Invalid JSON table key in json-write" k)))
 	    (display ": " p)
 	    (write-any v p)))
@@ -92,9 +143,9 @@
 	 ((vector? x) (write-ht x p))
 	 ;;((pair? x) (write-array x p))
 	 ((list? x) (write-array x p))
-	 ((symbol? x) (write (symbol->string x) p)) ;; for convenience
-	 ((or (string? x)
-	      (number? x)) (write x p))
+	 ((symbol? x) (write-json-string (symbol->string x) p)) ;; for convenience
+	 ((string? x) (write-json-string x p))
+	 ((number? x) (write-number x p))
 	 ((boolean? x) (display (if x "true" "false") p))
 	 ((json-null? x) (display "null" p))
 	 (else (error 'json-write "Invalid JSON object in json-write" x))))
