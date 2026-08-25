@@ -278,7 +278,66 @@
 (assert-equal "valid escape \\\\" (json-parse "\"a\\\\b\"") "a\\b")
 (assert-equal "valid escape \\/" (json-parse "\"a\\/b\"") "a/b")
 
-;; ---- 16. Edge cases ----
+;; ---- 16. json-write emits JSON syntax, not Scheme syntax (PE-103) ----
+
+(section "json-write string escaping")
+;; R6RS `write` escapes control characters as Scheme's \x1; which JSON has no
+;; syntax for. json-write must emit the JSON escapes instead.
+(assert-equal "write control U+0001 as \\u0001"
+  (json-roundtrip "\"a\\u0001b\"") "\"a\\u0001b\"")
+(assert-equal "write NUL as \\u0000"
+  (json-roundtrip "\"\\u0000\"") "\"\\u0000\"")
+(assert-equal "write U+001F as \\u001f"
+  (json-roundtrip "\"\\u001f\"") "\"\\u001f\"")
+(assert-equal "write newline as \\n" (json-roundtrip "\"a\\nb\"") "\"a\\nb\"")
+(assert-equal "write tab as \\t" (json-roundtrip "\"a\\tb\"") "\"a\\tb\"")
+(assert-equal "write backspace as \\b" (json-roundtrip "\"\\b\"") "\"\\b\"")
+(assert-equal "write formfeed as \\f" (json-roundtrip "\"\\f\"") "\"\\f\"")
+(assert-equal "write return as \\r" (json-roundtrip "\"\\r\"") "\"\\r\"")
+(assert-equal "write quote as \\\"" (json-roundtrip "\"a\\\"b\"") "\"a\\\"b\"")
+(assert-equal "write backslash as \\\\" (json-roundtrip "\"a\\\\b\"") "\"a\\\\b\"")
+;; Solidus and non-ASCII need no escaping and must survive unescaped.
+(assert-equal "write solidus unescaped" (json-roundtrip "\"a\\/b\"") "\"a/b\"")
+(assert-equal "write non-ASCII raw" (json-roundtrip "\"\\u00e9\"") "\"\xe9;\"")
+;; Object keys go through the same writer.
+(assert-equal "write control char in key"
+  (json-roundtrip "{\"a\\u0001b\": 1}") "{\"a\\u0001b\": 1}")
+
+(section "json-write output is re-readable")
+;; The defect PE-103 names: parse a document the parser accepts, write it, and
+;; the result must parse back to the same value.
+(define (json-reread str) (json-parse (json-roundtrip str)))
+(assert-equal "reread control char" (json-reread "\"a\\u0001b\"") "a\x1;b")
+(assert-equal "reread NUL" (json-reread "\"\\u0000\"") "\x0;")
+(assert-equal "reread newline" (json-reread "\"a\\nb\"") "a\nb")
+(assert-equal "reread key with control char"
+  (car (vector-ref (json-reread "{\"a\\u0001b\": 1}") 0)) "a\x1;b")
+
+(section "json-write rejects unrepresentable numbers")
+(define (json-write-fails-as-json-write? x)
+  (guard (exn [(and (who-condition? exn) (eq? (condition-who exn) 'json-write)) #t]
+              [#t #f])
+    (let-values (((port extract) (open-string-output-port)))
+      (json-write x port)
+      (extract))
+    #f))
+(assert-true "exact rational 1/3 rejected" (json-write-fails-as-json-write? 1/3))
+(assert-true "exact rational in array rejected"
+  (json-write-fails-as-json-write? (list 1/3)))
+(assert-true "+inf.0 rejected" (json-write-fails-as-json-write? (/ 1.0 0.0)))
+(assert-true "-inf.0 rejected" (json-write-fails-as-json-write? (/ -1.0 0.0)))
+(assert-true "+nan.0 rejected" (json-write-fails-as-json-write? (/ 0.0 0.0)))
+(assert-true "complex number rejected"
+  (json-write-fails-as-json-write? (make-rectangular 1 2)))
+;; Representable numbers still write.
+(assert-equal "exact integer writes" (json-roundtrip "42") "42")
+(assert-equal "negative integer writes" (json-roundtrip "-7") "-7")
+(assert-equal "flonum writes" (json-roundtrip "3.14") "3.14")
+;; PE-105 (still open) is why this checks the written text rather than the
+;; re-read value: "100.0" re-reads as an exact 100, which is a reader defect.
+(assert-equal "exponent writes as a JSON decimal" (json-roundtrip "1e2") "100.0")
+
+;; ---- 17. Edge cases ----
 
 (section "Edge cases")
 ;; Deeply nested
