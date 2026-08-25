@@ -452,6 +452,152 @@
 (assert-true "unterminated string still raises the json-read parse error"
   (json-parse-fails-as-json-read? "\"abc"))
 
+;; ---- 18. Literal and number delimiting (PE-102, first half) ----
+
+(section "Undelimited literals are rejected")
+
+;; RFC 8259 s3 and s6 spell true/false/null and a number as whole tokens. The
+;; parser stopped at the first complete value without checking what followed,
+;; so `truex` read as `true` and `0x10` read as `0`: the trailing text is not
+;; separate junk after a finished value, it is part of one malformed token.
+(assert-true "truex is not true" (json-parse-fails-as-json-read? "truex"))
+(assert-true "falsey is not false" (json-parse-fails-as-json-read? "falsey"))
+(assert-true "nullify is not null" (json-parse-fails-as-json-read? "nullify"))
+(assert-true "truetrue is not true" (json-parse-fails-as-json-read? "truetrue"))
+(assert-true "0x10 is not 0" (json-parse-fails-as-json-read? "0x10"))
+(assert-true "1abc is not 1" (json-parse-fails-as-json-read? "1abc"))
+(assert-true "12e3x is not 12000.0" (json-parse-fails-as-json-read? "12e3x"))
+(assert-true "1.5f is not 1.5" (json-parse-fails-as-json-read? "1.5f"))
+(assert-true "-1n is not -1" (json-parse-fails-as-json-read? "-1n"))
+(assert-true "a nested undelimited literal is rejected"
+  (json-parse-fails-as-json-read? "[truex]"))
+(assert-true "an undelimited literal in a member value is rejected"
+  (json-parse-fails-as-json-read? "{\"a\":0x10}"))
+
+(section "Delimited literals still parse")
+
+;; The delimiter check must reject only a token running into an adjacent token
+;; character. Every character that legitimately follows a value in JSON is
+;; whitespace or one of , ] } and none of them are affected.
+(assert-equal "bare true" (json-parse "true") #t)
+(assert-equal "true before a space" (json-parse "true ") #t)
+(assert-equal "true before a newline" (json-parse "true\n") #t)
+(assert-equal "true in an array" (json-parse "[true,false]") '(#t #f))
+(assert-equal "true as a member value" (json-parse "{\"a\":true}") '#(("a" . #t)))
+(assert-equal "null in an array is a json-null"
+  (map json-null? (json-parse "[null,null]")) '(#t #t))
+(assert-equal "integer in an array" (json-parse "[0,1]") '(0 1))
+(assert-equal "number before a closing brace" (json-parse "{\"a\":42}") '#(("a" . 42)))
+(assert-equal "exponent form" (json-parse "1e2") 100.0)
+(assert-equal "negative exponent form" (json-parse "1e-2") 0.01)
+(assert-equal "explicit positive exponent" (json-parse "1e+2") 100.0)
+(assert-equal "fraction form" (json-parse "1.5") 1.5)
+(assert-equal "fraction with exponent" (json-parse "1.5e2") 150.0)
+(assert-equal "negative number" (json-parse "-1") -1)
+(assert-equal "leading decimal point extension" (json-parse ".5") 0.5)
+(assert-equal "trailing decimal point extension" (json-parse "1.") 1.0)
+(assert-equal "a comment may follow a literal" (json-parse "[true/*c*/]") '(#t))
+(assert-equal "a comment may follow a number" (json-parse "[1//c\n]") '(1))
+
+;; ---- 19. Whole-document reading (PE-102, second half) ----
+
+(define (json-parse-document str)
+  (json-read-document (open-string-input-port str)))
+
+(define (json-document-fails-as-json-read? str)
+  (guard (exn [(and (who-condition? exn) (eq? (condition-who exn) 'json-read)) #t]
+              [#t #f])
+    (json-parse-document str)
+    #f))
+
+(section "json-read stays prefix-tolerant")
+
+;; json-read takes an optional port, so a caller may legitimately read
+;; successive values out of one stream. That is why the trailing-junk half of
+;; PE-102 is an addition rather than a tightening of json-read: making
+;; json-read demand end of input would break this.
+(let ((port (open-string-input-port "1 2 3")))
+  (assert-equal "first value from a shared port" (json-read port) 1)
+  (assert-equal "second value from a shared port" (json-read port) 2)
+  (assert-equal "third value from a shared port" (json-read port) 3))
+(assert-equal "json-read still stops after the first value"
+  (json-parse "{\"a\":1} garbage") '#(("a" . 1)))
+(assert-equal "json-read still ignores an unbalanced bracket"
+  (json-parse "[1,2]]") '(1 2))
+(assert-equal "json-read still returns the first of two literals"
+  (json-parse "true false") #t)
+(assert-true "json-read still reports end of input as the eof object"
+  (eof-object? (json-parse "")))
+
+(section "json-read-document requires end of input")
+
+(assert-equal "an object is a whole document"
+  (json-parse-document "{\"a\":1}") '#(("a" . 1)))
+(assert-equal "an array is a whole document"
+  (json-parse-document "[1,2]") '(1 2))
+(assert-equal "a bare literal is a whole document"
+  (json-parse-document "true") #t)
+(assert-equal "a bare number is a whole document"
+  (json-parse-document "42") 42)
+(assert-equal "a bare string is a whole document"
+  (json-parse-document "\"hi\"") "hi")
+(assert-equal "leading and trailing whitespace is allowed"
+  (json-parse-document "  \n [1, 2] \t\n ") '(1 2))
+(assert-equal "a trailing comment is allowed"
+  (json-parse-document "[1] /* done */") '(1))
+(assert-equal "a trailing line comment is allowed"
+  (json-parse-document "[1] // done\n") '(1))
+;; A file whose last line is a comment and which has no final newline is the
+;; ordinary case, not a contrived one. skip-to-newline used to demand a real
+;; newline, so the line comment never parsed as whitespace at all; json-read
+;; never noticed because it stops at the value and ignores the rest.
+(assert-equal "a trailing line comment needs no final newline"
+  (json-parse-document "[1] // done") '(1))
+(assert-equal "an empty trailing line comment is allowed"
+  (json-parse-document "[1] //") '(1))
+(assert-equal "a line comment at end of input is whitespace to json-read too"
+  (eof-object? (json-parse "// done")) #t)
+
+(assert-true "trailing junk is rejected"
+  (json-document-fails-as-json-read? "{\"a\":1} garbage"))
+(assert-true "an unbalanced closing bracket is rejected"
+  (json-document-fails-as-json-read? "[1,2]]"))
+(assert-true "two values are rejected"
+  (json-document-fails-as-json-read? "true false"))
+(assert-true "two numbers are rejected"
+  (json-document-fails-as-json-read? "1 2"))
+(assert-true "an undelimited literal is rejected"
+  (json-document-fails-as-json-read? "truex"))
+(assert-true "empty input is not a document"
+  (json-document-fails-as-json-read? ""))
+(assert-true "whitespace alone is not a document"
+  (json-document-fails-as-json-read? "   \n "))
+(assert-true "a comment alone is not a document"
+  (json-document-fails-as-json-read? "/* nothing */"))
+(assert-true "a trailing comma is still rejected"
+  (json-document-fails-as-json-read? "[1,]"))
+
+;; JSON has no identifier syntax, so an underscore is not a character that can
+;; continue a literal or a number and the delimiter lookahead deliberately
+;; leaves it alone. json-read therefore still reads a prefix here, and the
+;; whole-document reader is what rejects it. This is the boundary between the
+;; two halves of PE-102, so it is asserted rather than left implicit.
+(assert-equal "json-read reads a prefix before an underscore"
+  (json-parse "true_x") #t)
+(assert-equal "json-read reads a number before an underscore"
+  (json-parse "1_2") 1)
+(assert-true "json-read-document rejects a literal before an underscore"
+  (json-document-fails-as-json-read? "true_x"))
+(assert-true "json-read-document rejects a number before an underscore"
+  (json-document-fails-as-json-read? "1_2"))
+
+;; The whole-document reader must not become a second, laxer parser: every
+;; value it accepts is exactly what json-read accepts.
+(assert-equal "escapes read the same way through both entry points"
+  (json-parse-document "\"\\uD83D\\uDE00\"") (json-parse "\"\\uD83D\\uDE00\""))
+(assert-equal "nested structures read the same way through both entry points"
+  (json-parse-document "{\"a\":[1,{\"b\":null}],\"c\":\"x\"}")
+  (json-parse "{\"a\":[1,{\"b\":null}],\"c\":\"x\"}"))
 ;; ---- Summary ----
 
 (newline)

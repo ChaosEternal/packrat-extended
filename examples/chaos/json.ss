@@ -3,6 +3,7 @@
 (library (chaos json)
   (export json-write
 	  json-read
+	  json-read-document
 	  make-json-null
 	  json-null?)
   (import (rnrs)
@@ -153,7 +154,12 @@
       (lambda (x . maybe-port)
 	(write-any x (if (pair? maybe-port) (car maybe-port) (current-output-port))))))
 
-  (define json-read
+  ;; json-read and json-read-document share one grammar and one generator, so
+  ;; they are built together here and pulled apart below. packrat-parser's
+  ;; first argument is the start nonterminal, and the macro splices it in as
+  ;; the body of the `let` it generates, so naming a pair of nonterminals there
+  ;; is how one grammar serves two entry points.
+  (define json-readers
     (let ()
       (define (generator p)
 	(let ((ateof #f)
@@ -170,16 +176,24 @@
 		      (let ((old-pos pos))
 			(set! pos (update-parse-position pos x))
 			(values old-pos (cons x x)))))))))
-      (define parser
-	(packrat-parser 
-			any
+      (define parsers
+	(packrat-parser
+			(cons any document)
+			;; A JSON text is one value and nothing else (RFC 8259
+			;; s2). `any` stops as soon as that value is complete
+			;; and never looks at the rest of the stream, which is
+			;; what json-read wants: it takes a port, so a caller
+			;; may read successive values out of one stream.
+			;; `document` is the same value followed by end of
+			;; input, for a caller reading a whole document.
+			(document ((v <- any white '#\x04) v))
 			(any ((white '#\{ entries <- table-entries white '#\}) (list->vector entries))
 			     ((white '#\[ entries <- array-entries white '#\]) entries)
 			     ((s <- jstring) s)
 			     ((n <- jnumber) n)
-			     ((white (token "true")) #t)
-			     ((white (token "false")) #f)
-			     ((white (token "null")) (make-json-null))
+			     ((white (token "true") (! (? json-token-char?))) #t)
+			     ((white (token "false") (! (? json-token-char?))) #f)
+			     ((white (token "null") (! (? json-token-char?))) (make-json-null))
 			     ((white '#\x04) (eof-object)))
 			(white ((a <- (? char-whitespace?) white) 'whitespace)
 			       ((b <- (? char-whitespace?)) 'whitespace)
@@ -192,9 +206,19 @@
 				 (() 'whitespace))
 			(comment-body (((token "*/") w <- white) w)
 				      (((? true) comment-body) 'skipped-comment-char))
-			(skip-to-newline (((? (inverse char-newline?))
+			;; A line comment ends at a newline or at end of input,
+			;; and the last line of a file often has no newline.
+			;; The character-consuming alternative therefore stops
+			;; short of the #\x04 end-of-input token rather than
+			;; consuming it, so the empty alternative ends the
+			;; comment and leaves that token for `document`.
+			;; A raw U+0004 in the middle of a line comment ends it
+			;; early, which is the sentinel aliasing of PE-104 and
+			;; not something this rule can fix on its own.
+			(skip-to-newline (((? char-newline?) white) 'whitespace)
+					 (((! '#\x04) (? true)
 					   skip-to-newline) 'whitespace)
-					 (((? char-newline?) white) 'whitespace)
+					 (() 'whitespace)
 					 )
 			
 			(table-entries ((a <- table-entries-nonempty) a)
@@ -207,7 +231,15 @@
 			(array-entries-nonempty ((entry <- any white '#\, entries <- array-entries-nonempty) (cons entry entries))
 						((entry <- any) (list entry)))
 			(jstring ((white '#\" body <- jstring-body '#\") (jstring-body->string body)))
-			(jnumber
+			;; A number is delimited the same way a literal is: the
+			;; longest alternative that matches wins, and whatever
+			;; it leaves behind must not be another token character.
+			;; One lookahead here covers all eight alternatives,
+			;; and because ordered choice cannot backtrack into
+			;; jnumber-token once it has succeeded, `0x10` fails
+			;; outright rather than falling back to a shorter match.
+			(jnumber ((n <- jnumber-token (! (? json-token-char?))) n))
+			(jnumber-token
 			 ((white '#\- body <- jfixpoint (/ ('#\E) ('#\e)) e <- jexponent) (- (* (expt 10 e) 1.0 body)))
 			 ((white '#\- body <- jsafeint (/ ('#\E) ('#\e)) e <- jexponent) (- (* (expt 10 e) 1.0 (car body))))
 			 ((white '#\- body <- jfixpoint) (- body))
@@ -237,8 +269,8 @@
 				   (('#\. b <- jinteger) (/ (car b) (expt 10 (+ 1.0 (cdr b)))))
 				   ((b <- jsafeint '#\.) (exact->inexact (car b))))))
 
-      (define (read-any p)
-	(let ((result (parser (base-generator->results (generator p)))))
+      (define (read-with parse p)
+	(let ((result (parse (base-generator->results (generator p)))))
 	  (if (parse-result-successful? result)
 	      (parse-result-semantic-value result)
 	      (error 'json-read "JSON Parse Error"
@@ -248,7 +280,21 @@
 			     (parse-error-expected e)
 			     (parse-error-messages e)))))))
 
-      (lambda maybe-port
-	(read-any (if (pair? maybe-port) (car maybe-port) (current-input-port))))))
+      (define (entry-point parse)
+	(lambda maybe-port
+	  (read-with parse
+		     (if (pair? maybe-port) (car maybe-port) (current-input-port)))))
+
+      (cons (entry-point (car parsers))
+	    (entry-point (cdr parsers)))))
+
+  (define json-read (car json-readers))
+
+  ;; Reads one JSON value and then requires end of input, so a document with
+  ;; anything after its first complete value is a parse error rather than a
+  ;; silently truncated read. Trailing whitespace and trailing comments are
+  ;; still allowed. Empty input is an error here, where json-read returns the
+  ;; end-of-file object.
+  (define json-read-document (cdr json-readers))
 
   )
