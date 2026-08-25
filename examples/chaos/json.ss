@@ -197,10 +197,15 @@
 			;; the end-of-file object is not a JSON value, so it
 			;; must not be what a whole document reads as, nor
 			;; appear as an array element or an object value.
-			;; Matching the end of input consumes nothing and so
-			;; succeeds repeatedly, which is why `document` cannot
-			;; be built on `any` -- it would read empty input as a
-			;; document whose value is the end-of-file object.
+			;; Matching the end of input must be the LAST thing a
+			;; rule does. packrat-check-base hands the continuation
+			;; (parse-results-next results), and empty-results has
+			;; no next, so anything sequenced after a '#f match
+			;; runs against #f rather than against a results
+			;; record. That is why `document` cannot be built on
+			;; `any`: `any`'s empty-stream alternative would match
+			;; the end, and `document`'s own trailing '#f would
+			;; then be looking at #f.
 			(any ((v <- value) v)
 			     ((white '#f) (eof-object)))
 			(value ((white '#\{ entries <- table-entries white '#\}) (list->vector entries))

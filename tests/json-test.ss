@@ -620,15 +620,27 @@
   (json-document-fails-as-json-read? "true\x4;x"))
 
 ;; A line comment runs to the end of the line or to the end of input, and the
-;; aliasing gave a raw U+0004 the power to end one early -- which smuggled the
-;; rest of the commented-out line back out as document text and made this a
-;; parse error. A U+0004 is now just another character the comment swallows,
-;; so the whole tail stays commented out and the document is the array alone.
+;; aliasing gave a raw U+0004 the power to end one early. That did not raise;
+;; it did something worse. The character ended the comment, and then served as
+;; the end-of-input token the document reader was waiting for, so the reader
+;; accepted the document and silently abandoned the rest of the stream. A
+;; U+0004 is now just another character the comment swallows.
 (assert-equal "U+0004 does not end a line comment early"
   (json-parse-document "[1] // a\x4;junk") '(1))
 (assert-equal "a U+0004 in a line comment reads like any other character"
   (json-parse-document "[1] // a\x4;junk")
   (json-parse-document "[1] // a-junk"))
+;; The two assertions above hold on master as well, for the wrong reason: they
+;; agree on the value and differ only in what is left on the port. This is the
+;; one that discriminates.
+(assert-true "the document reader consumes a comment holding U+0004 whole"
+  (let ((p (open-string-input-port "[1] // a\x4;junk")))
+    (json-read-document p)
+    (eof-object? (get-string-all p))))
+;; The sharpest symptom of all: a comment containing U+0004 used to swallow the
+;; only value in the stream, so a document that plainly held one read as empty.
+(assert-equal "a value after a comment holding U+0004 is still read"
+  (json-parse "// a\x4;b\n42") 42)
 ;; A block comment ends at its own delimiter and never cared about the
 ;; sentinel, so this stays an unterminated comment and therefore an error.
 (assert-true "U+0004 does not terminate a block comment"
